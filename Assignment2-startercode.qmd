@@ -1,124 +1,386 @@
 ---
-title: "ADD IN MEANINGFUL TITLE HERE"
-author: "GROUP NUMBER: ADD YOUR NAMES HERE"
+title: "Understanding Liberals vote base"
+author: "Ahnaf Alam"
 subtitle: "STA304 - Winter 2025 - Assignment 2"
-format: pdf
+format:
+  pdf:
+    number-sections: true
 editor: visual
+date: today
+date-format: long
+bibliography: ref.bib
+toc: true
+thanks: For reproducibity, please visit https://github.com/AhnafAlam1/cdn_election
 ---
 
-```{r, include = FALSE}
+```{r}
+#| include: false
+#| warning: false
+#| message: false
 
-# Here you can load in and clean the data (you may need to do the cleaning in a separate R script - this is up to you). 
+
 library(tidyverse)
+library(survey)
+library(knitr)
+library(broom)
+library(ggplot2)
 
-phone_data <- read_csv("ces_phone.csv")
-web_data <- read_csv("ces_web.csv")
 
-# You may need additional chunks, in case you want to include some of the cleaning output.
-
-```
-
-# 1 Introduction
-
-In this section you will briefly describe your report. Explain the importance of the subsequent analysis and prepare the reader for what they will read in the subsequent sections. Provide an overview of the research question. Briefly describe the 2019 Canadian Federal Election Study and its relevance. State the purpose and goals/hypotheses of the report.
-
-# 2 Data
-
-Briefly introduce the data and key variables of interest. If you do any general data cleaning or data processing you should describe it (in a reproducible manner) here. Identify the stratification variable used. Include at least one plot displaying the distribution of the strata variable. If you do any data cleaning or data processing to the you should describe it (in a reproducible manner) in this section.
-
-```{r, include = FALSE}
-
-# Here you can clean the data. 
-
-# You may need additional chunks, in case you want to include some of the cleaning output.
-
-# For example, maybe I want to look at gender, and I want to update the labels of the gender variable in the phone data, to match the web data.
-
-phone_data <- 
-  phone_data %>% 
-  mutate(gender = case_when(q3==1 ~ "Man",
-                            q3==2 ~ "Woman",
-                            q3==3 ~ "Other")) 
+web_data <- read_csv("ces_web.csv") #fetching the data
 
 ```
 
-Be sure to have text describing any plots or tables included.
 
-```{r, echo = FALSE}
+# Introduction
 
-# Use this to create your plots/visualization. 
+Election surveys are important for understanding voter preferences, predicting election outcomes, and informing public policy. Survey polls are also tools for political campaigns to identify where their support is highest and where they need to focus efforts to get better election results. In this report, we aim to understand which regions support the Liberal Party of Canada and where they need to improve to gain a greater share of the vote. Specifically, we estimate the proportion of total Liberal support across Canada and run a logistic regression to differentiate Liberal popularity across different regions. We also incorporate age into this model to understand how age influences the Liberal vote share. Our data comes from the 2019 Canadian Federal Election Study [@Stephenson2020], specifically focusing on web data. The analysis examines respondents' age, province, and their reported likelihood of voting, aiming to predict the likelihood of voting for the Liberal Party in the 2019 elections. Age and provincial differences are critical factors in election campaigns, and identifying these differences can help the Liberal Party efficiently allocate resources and focus on demographics and regions where they stand the best chance of winning.
 
-hist(phone_data$q3) 
+The 2019 Canadian Federal Election Study is an extensive dataset that includes responses from both phone and web surveys. Despite the different collection methods, both datasets contain comparable variables on voter intention and demographic information. This dataset offers a valuable opportunity to assess the reliability of each method and explore potential biases.
+
+This report aims to identify age and province-related differences in Liberal vote share. The findings can inform future political campaigns by identifying strengths and weaknesses, helping the party target specific demographics, and developing policies that can resonate with groups that may not traditionally support Liberal ideas. The subsequent sections outline the data preparation process (@sec-data), model details (@sec-methods) present visual comparisons of Liberal vote share, and analyze reported voting intentions  (@sec-results), and discuss potential biases in the method (@sec-discussion).We end the report with a discussion on the use of generative AI (@sec-ai) and ethical consideration (@sec-ethics).
+
+# Data {#sec-data}
+
+The data used in this analysis comes from the 2019 Canadian Federal Election Study [@Stephenson2020]. This study examines data collected from web sources, focusing on three variables: province, likelihood of voting in the election, and political party. I use province as the stratified variable.
+
+@fig-1 shows the number of participants in the web survey from each Canadian province. While the distribution may appear skewed, with participants from Ontario and Quebec comprising a large portion of the data, this reflects the actual population distribution across Canada. Ontario has nearly 12,000 data entries, which aligns with its status as Canada's most populous province. Conversely, the territories have fewer than 1,000 entries combined, reflecting their smaller population size. Since the data reflects population distribution, stratifying by province ensures that each province's data is analyzed in proportion to its actual population. Without stratification, provinces with larger sample sizes, such as Ontario and Quebec, could disproportionately influence the overall results. Stratification solves this problem by ensuring that each region contributes appropriately to the analysis.
+
+Data cleaning was limited to the variables used in this study. Specifically, province, likely_to_vote, and political_party were re-encoded from numerical values to their corresponding categories. For example, the raw data coded "Ontario" as "22"; in the cleaned version, "Ontario" is coded as "Ontario."
+
+The analysis was conducted using R [@r], a statistical programming language. The tidyverse package [@tidy] was used for data cleaning, and ggplot2 [@gg] was used for visualizations. I also used the survey package [@survey] for modeling and relied on broom [@broom] and ggplot2 for aesthetic improvements.
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+web_data_clean <- web_data |>
+  filter(!is.na(cps19_province)) |>
+  filter(!is.na(cps19_votechoice)) |>
+  filter(!is.na(cps19_yob)) |>
+  mutate(province = case_when(
+    cps19_province == 14 ~ "Alberta",
+    cps19_province == 15 ~ "British Columbia",
+    cps19_province == 16 ~ "Manitoba",
+    cps19_province == 17 ~ "New Brunswick",
+    cps19_province == 18 ~ "Newfoundland & Labrador",
+    cps19_province == 19 ~ "Northwest Territories",
+    cps19_province == 20 ~ "Nova Scotia",
+    cps19_province == 21 ~ "Nunavut",
+    cps19_province == 22 ~ "Ontario",
+    cps19_province == 23 ~ "Prince Edward Island",
+    cps19_province == 24 ~ "Quebec",
+    cps19_province == 25 ~ "Saskatchewan",
+    cps19_province == 26 ~ "Yukon"
+  ),
+  likey_to_vote = case_when(
+    cps19_v_likely == 1 ~ "Certain",
+    cps19_v_likely == 2 ~ "Likely",
+    cps19_v_likely == 3 ~ "Unlikely",
+    cps19_v_likely == 4 ~ "Certain to not vote",
+    cps19_v_likely == 5 ~ "Ineligible to vote",
+    cps19_v_likely == 6 ~ "Don't know/prefer not to answer",
+    cps19_v_likely == 7 ~ "I voted in advanced polling"
+  ),
+  political_party = case_when(
+    cps19_votechoice == 1 ~ "Liberals",
+    cps19_votechoice == 2 ~ "Conservatives",
+    cps19_votechoice == 3 ~ "NDP",
+    cps19_votechoice == 4 ~ "Bloc Quebec",
+    cps19_votechoice == 5 ~ "Green Party",
+    cps19_votechoice == 6 ~ "People's Party",
+    cps19_votechoice == 7 ~ "Others",
+    cps19_votechoice == 9 ~ "Don't know/prefer not to answer"
+  )) 
+
 
 ```
 
-# 3 Methods
+```{r}
+#| label: fig-1
+#| fig-cap: Number of participants in the survey from each Canadian province
+#| echo: false
+#| warning: false
+#| message: false
 
-Include the formula for calculating the confidence interval for proportions (do not include specific numbers yet) and provide a description of its components. Present the logistic regression model, specifying the independent variables and expected interpretation of coefficients (parameters, not estimates), and describe the model. In this section you are preparing the reader for how to interpret the numbers displayed in the next section (Results).
 
-Be sure to include your CI formula, and a description of the components of the formula.
+web_data_clean |>
+  ggplot(aes(x = province)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Distribution of respondents by province",
+       x = "Province",
+       y = "Count") +
+  theme_classic() +
+  coord_flip()
+```
 
-$$\bar{X} \pm \chi_{\alpha/2} \sqrt{\frac{1+1}{n}}$$
+```{r}
+#| include: false
+#| warning: false
+#| message: false
 
-Be sure to include your logistic regression model, and a description of the components of the model.
+# Population stats for provinces taken from Statistics Canada
 
-$$y = mx+ b$$
-
-# 4 Results
-
-Present a table showing the estimated proportion of votes for the selected party along with the 95% confidence interval, and include text describing this table and the key takeaways.
-
-```{r, include = FALSE}
-
-# Here you can run code to calculate your Confidence Intervals.
+web_data_clean <- web_data_clean |>
+  mutate(pop_fpc = case_when(province == "Alberta" ~ 4931601,
+                             province == "British Columbia" ~ 5719594,
+                             province == "Manitoba" ~ 1499981,
+                             province == "Quebec" ~ 9100249,
+                             province == "Newfoundland & Labrador" ~ 545880,
+                             province == "Nova Scotia" ~ 1079676,
+                             province == "Ontario" ~ 16171802,
+                             province == "Saskatchewan" ~ 1246691,
+                             province == "Prince Edward Island" ~ 179301,
+                             province == "New Brunswick" ~ 857381,
+                             province == "Northwest Territories" ~ 44936,
+                             province == "Nunavut" ~ 41258,
+                             province == "Yukon" ~ 46948)) |>
+  mutate(samp_wt = case_when(province == "Alberta" ~ 4931601/3742,
+                             province == "British Columbia" ~ 5719594/3574 ,
+                             province == "Manitoba" ~ 1499981/1407,
+                             province == "Quebec" ~ 9100249/7024,
+                             province == "Newfoundland & Labrador" ~ 545880/537,
+                             province == "Nova Scotia" ~ 1079676/887,
+                             province == "Ontario" ~ 16171802/12338,
+                             province == "Saskatchewan" ~ 1246691/1131,
+                             province == "Prince Edward Island" ~ 179301/133,
+                             province == "New Brunswick" ~ 857381/717,
+                             province == "Northwest Territories" ~ 44936/21,
+                             province == "Nunavut" ~ 41258/21,
+                             province == "Yukon" ~ 46948/32)) |>
+  filter(!is.na(samp_wt)) |>
+  filter(!is.na(pop_fpc))
 
 ```
 
-In Table 1 I present both confidence intervals of....
+```{r}
+#| include: false
+#| warning: false
+#| message: false
 
-|   | Proportion of Outcome Variable | 95% Confidence Interval of Outcome Variable |
-|----|----|----|
-| Phone Survey | 0.34 | (lower bound, upper bound) |
-| Web Survey | 0.25 | (lower bound, upper bound) |
 
-: The proportions and 95% confidence intervals of outcome variable of interest calculated for both the Canadian Election Study 2019 phone and web survey data.
+strata.design <- svydesign(id= ~1,
+                           strata = ~province,
+                           weights = ~samp_wt,
+                           fpc = ~pop_fpc,
+                           data = web_data_clean
+                           )
+```
 
-Provide a table or formula of the estimated logistic regression model, and include text describing this table/formula and the key takeaways. Interpret the estimates from the logistic regression model. Specifically, commenting on how the predictor variables relate to the outcome variable.
+# Methods {#sec-methods}
 
-Below is the estimate regression model....
+The logistic regression formula for the model is:  
 
-$$
-\hat{y} = 18x+3
-$$
+$$\begin{aligned}
+\log \left(\frac{P(\text{vote for Liberals})}{1 - P(\text{vote for Liberals})}\right) &= \beta_0 + \beta_1 \cdot \text{province}_{\text{British Columbia}} \\
+&\quad + \beta_2 \cdot \text{province}_{\text{Manitoba}} + \beta_3 \cdot \text{province}_{\text{New Brunswick}} \\
+&\quad + \cdots + \beta_{13} \cdot \text{province}_{\text{Yukon}} + \beta_{14} \cdot \text{age}
+\end{aligned}$$
 
-# 5 Discussion
 
-Summarize key findings. Discuss limitations of the analysis (e.g., potential biases, missing variables, survey errors). Provide recommendations for future research or improvements.
 
-# 6 Generative AI Statement
+In this model, the dependent variable represents the log odds of voting for the Liberal Party. The independent variables include a set of dummy variables for Canadian provinces and territories, as well as respondents' age. The intercept ($\beta_0$) represents the log odds of voting Liberal in the reference province when the respondent is 18 years old, the legal voting age in Canada. Each coefficient for the province dummy variables ($\beta_1$ to $\beta_{13}$) represents the difference in log odds of voting Liberal in that province compared to the reference province. A positive coefficient indicates a higher likelihood of supporting the Liberals relative to the reference province, while a negative coefficient indicates a lower likelihood. The coefficient for age ($\beta_{14}$) reflects the change in log odds of voting Liberal for each additional year of age. A positive coefficient would suggest older individuals are more likely to vote Liberal, whereas a negative coefficient would suggest younger individuals are more likely to support the party.
 
-Here is where you can explain your usage of Generative AI tool(s). Be sure to reference any tools with inline citations.
+The formula for the expected proportion of Liberal votes is  
 
-Alternatively, if you did not use Generative AI, please include a brief statement outlining your workflow for completing this assignment.
+$$\hat{p} = \frac{\text{Total Liberal Votes}}{n}$$
 
-# 7 Ethics Statement
+where the numerator is the total number of respondents who indicate they will likely vote Liberal, and the denominator is the total sample size. The 95% confidence interval for this proportion is calculated using the following formula:  
 
-Explain how you ensured that your analysis is reproducible (e.g., documenting code, using proper statistical methods).
+$$\hat{p} \pm z_{0.975} \sqrt{\sum_{h=1}^H W_h^2 \left(1 - \frac{n_h}{N_h} \right) \frac{\hat{p}(1 - \hat{p})}{n_h}}$$
 
-Since the CES 2019 data is publicly available, describe whether or not this the work completed in your report needs Research Ethics Board approval for the report the be made publicly available. Be sure to specifically discuss the privacy of human participants in this study.
+In this formula, the term $1 - \frac{n_h}{N_h}$ is the finite population correction, which adjusts for cases where a large portion of a stratum's population is sampled. Here, $n_h$ is the sample size in stratum $h$ (e.g., a particular province), and $N_h$ is the population size for that stratum. Population data is obtained from Statistics Canada.  
 
+A wider confidence interval reflects greater uncertainty about the true proportion of Liberal support. This increased uncertainty may result from smaller sample sizes, greater variability within strata, or larger finite population corrections. A wider interval ultimately makes it more difficult to predict the actual vote share with confidence.
+
+# Results {#sec-results}
+
+@tbl-1 shows the 95% confidence interval for the proportion of expected votes for the Liberal Party. An estimated 28.4% of the survey population intends to vote for the Liberals. The 95% confidence interval ranges from 27.9% to 28.8%. This means we are 95% confident that the true proportion of Liberal support falls within this interval. The narrow range of the confidence interval suggests a relatively precise estimate, with some uncertainty. 
+
+@tbl-2 presents the results of the logistic regression analysis. The model designates Alberta as the reference category, meaning all $\beta$ coefficients represent the log-likelihood of voting for the Liberal Party relative to Alberta. The intercept ($\beta_0$) is significant and negative, indicating a low baseline likelihood of voting Liberal in Alberta.
+
+The regression results do not show uniform support for the Liberals across Canada but instead suggest regional differences. Compared to Alberta, most provinces and territories have positive and significant $\beta$ coefficients, indicating a higher log-likelihood of voting for the Liberals. Specifically, Ontario, Quebec, British Columbia, Newfoundland & Labrador, Nova Scotia, New Brunswick, Manitoba, Prince Edward Island, Northwest Territories, and Nunavut all show significantly higher Liberal support. Saskatchewan is the only province with a lower likelihood of voting Liberal than Alberta, suggesting strong opposition to the party. Yukon is the only province where the difference from Alberta is not statistically significant. These results highlight a clear regional divide, with the Liberals performing significantly better in central and eastern Canada while struggling in the Prairie provinces.
+
+The model also suggests a significant negative relationship between age and Liberal support. The negative and significant $\beta$ coefficient indicates that as age increases, the log-likelihood of voting Liberal decreases. However, the estimated magnitude of this effect is small ($\beta$ = -0.0037), meaning the impact of age on voting Liberal is negligible. For each additional year of age, the log-odds of voting Liberal decreases by 0.0037, indicating a gradual rather than drastic decline.
+
+@fig-2 displays the odds ratios from the logistic regression model, providing a clearer visualization of the relative likelihood of voting Liberal. The graph highlights several key points. Newfoundland & Labrador has the highest odds ratio, with voters there being nearly 3.6 times more likely to vote Liberal than those in Alberta. Ontario, Canada’s most populous province, is almost 2.8 times more likely to support the Liberals. By contrast, Saskatchewan’s odds ratio falls below 1, confirming its strong opposition to the party. These figures reinforce the regional and demographic differences in Liberal support across Canada. 
+
+
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| include: false
+
+
+liberal_proportion <- svymean(~I(political_party == "Liberals"), design = strata.design, na.rm = TRUE)
+prop_ci <- confint(liberal_proportion)
+
+table1 <- data.frame(
+  Party = "Liberals",
+  Proportion = 0.284,
+  Confidence_Interval = "(0.279, 0.288)"
+)
+
+```
+
+
+```{r}
+#| label: tbl-1
+#| tbl-cap: "Table showing proportion and 95% confidence interval for Liberal vote"
+#| warning: false
+#| message: false
+#| echo: false
+
+kable(table1, 
+      col.names = c("", "Proportion of vote for Liberals", "95% Confidence Interval"))
+
+```
+
+
+
+
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+
+N = 41465298  
+
+web_data_clean <- web_data_clean |>
+  mutate(vote_party_lib = as.numeric(political_party == "Liberals"))
+
+
+n= nrow(web_data_clean)
+fpc.srs = rep(N, n)  
+
+
+strata.design <- svydesign(
+  id = ~1,
+  fpc = ~fpc.srs,
+  data = web_data_clean
+)
+
+
+model <- svyglm(
+  vote_party_lib ~ as.factor(province) + cps19_yob, 
+  design = strata.design, 
+  family = binomial
+)
+
+
+```
+
+
+
+
+```{r}
+#| label: tbl-2
+#| tbl-cap: Table showing the proportion and 95% confidence interval for Liberal votes across Canada
+#| warning: false
+#| message: false
+#| echo: false
+
+
+tidy_model <- tidy(model, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "as.factor\\(province\\)", "")) |>
+  kable(digits = 4)
+
+print(tidy_model)
+
+```
+
+
+
+
+```{r}
+#| label: fig-2
+#| echo: false
+#| warning: false
+#| message: false
+
+###https://stackoverflow.com/questions/47085514/simple-way-to-visualise-odds-ratios-in-r
+
+
+boxLabels = c("Intercept", "BC", "Manitoba", "NB", "N&L", "NT", "NS", "Nunavut",
+              "Ontario", "PEI", "Quebec", "Saskatchewan", "Yukon", "Age")
+
+
+df <- data.frame(
+  yAxis = length(boxLabels):1,
+  boxOdds = exp(c(-1.540536505, 
+                  0.671652047, 0.604664410, 0.929123659, 1.288834768, 
+                  1.244600359, 1.161939492, 1.258780759, 
+                  1.032405488, 0.951990356, 0.832012038, -0.265099042, 
+                  0.454166860, -0.003656125)), 
+  boxCILow = exp(c(-1.657570561, 0.554966136, 0.454110369, 0.747425846, 
+                   1.094273991, 0.364461698, 0.998743020, 0.375731744, 
+                   0.935257796, 0.575839065, 0.728654696, -0.465533442, 
+                   -0.390821510, -0.005171445)),  
+  boxCIHigh = exp(c(-1.423502450, 0.788337958, 0.755218452, 1.110821473, 
+                    1.483395546, 2.124739019, 1.325135965, 2.141829775, 
+                    1.129553179, 1.328141646, 0.935369379, -0.064664643, 
+                    1.299155231, -0.002140806)) 
+)
+
+
+p <- ggplot(df, aes(x = boxOdds, y = boxLabels)) + 
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed") +  
+  geom_errorbarh(aes(xmax = boxCIHigh, xmin = boxCILow), size = .5, height = .2, color = "gray50") +  
+  geom_point(size = 3.5, color = "steelblue") + 
+  scale_x_continuous(
+    breaks = seq(0.1, 5, 0.5), 
+    labels = seq(0.1, 5, 0.5), 
+    limits = c(0.1, 5)  
+  ) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank()) + 
+  ylab("") + 
+  xlab("Odds Ratio") + 
+  ggtitle("Odds Ratio for voting Liberals, by province")
+
+
+print(p)
+
+
+```
+
+
+
+
+
+
+
+
+
+# Discussion {#sec-discussion}
+
+In this report, we estimate how the proportion of Liberal votes varies across regions and age groups in Canada. The results suggests a regional divide in Liberal support, with the Prairie provinces showing significantly lower support than Eastern Canada. We also find a significant but negligible effect of age, with each additional year decreasing the log-likelihood of voting for the Liberals. However, the current model combines age with regional effects, meaning the individual effect of age on voting behavior is not captured. While the log-likelihood statistic shows the likelihood of voting Liberal across regions, the reasons behind these differences—whether due to age or other demographic factors—are not fully understood. Further analysis is needed to explore these effects.
+
+Another potential issue is omitted variable bias. We did not include predictors such as education and income, which previous studies have shown to significantly impact voting behavior. For example, research suggests that education tends to shift individuals toward the right on the political spectrum [@Meyer2017], while income differences may influence party preferences [@Polacko_Kiss_Graefe_2022]. The exclusion of these factors could lead to biased estimates of the relationship between region and voting preference, as well as affect the magnitude and direction of the results.
+
+Another limitation comes from missing data in the survey responses. For instance, 16.5% of responses are missing for the preferred political party variable. We assume the data are missing at random (MAR), because there is a possibility that missing data could come from certain behavioral patterns linked to participant characteristics. We predict that individuals with lower education levels or younger participants may be less likely to engage in political surveys, leading to missing values in the voting behavior responses. However, we do not conduct any analysis to establish that this is the case in actuality. The current study excludes rows with missing values, which was not problematic as the dataset still contained a sufficient number of observations for robust analysis.
+
+A further issue arises with the population data obtained from StatCan. Their estimate includes ineligible voters, such as temporary residents, refugee claimants, and landed immigrants. This is problematic because approximately 6.2% of the Canadian population consists of temporary residents [@statcan_non_permanent_residents_2025], which could result in statistics that do not accurately reflect the size of the eligible voting Canadian population. This could skew the estimates found in @tbl-1, leading to erroneous conclusions.
+
+In future research, we aim to address these issues. First, we will include additional predictor variables in the analysis model. Previous literature highlights that education, income, and other factors can predict voting patterns. Including these variables will reduce bias and improve the robustness of the analysis. Second, we intend to investigate the origin of the missing data values and clean up population statistics to reduce biases in our report.
+
+
+# Generative AI Statement {#sec-ai}
+
+Generative AI was used in this analysis. Specifically, ChatGPT served several purposes. First, I used it to edit and correct mechanical mistakes in my writing. It identified errors in punctuation, spelling, and grammar. Additionally, I used ChatGPT [@openai2023chatgpt] as a proofreader, asking it to identify sentences or paragraphs that might be unclear or difficult for readers to follow, including run-on sentences. Lastly, I relied on ChatGPT for LaTeX coding. In @sec-methods, I provide details on the models used in this report. The code for these models was generated by ChatGPT. As the sole author of this report, I proofread all text after running it through ChatGPT to ensure that it accurately reflects my ideas and does not contain any errors or hallucinations from the generative AI tool.
+
+For workflow, I used two external sources for this report. First, I obtained population data from Statistics Canada (StatCan). I used population estimates from the fourth quarter of 2024. StatCan relies on census data, surveys, and administrative records such as tax and immigration data to produce these estimates [@statcan_population_2025]. Lastly, I obtained the code for @fig-2 from Stack Overflow, an inquiry-based forum for coding questions. I altered their code to fit my data in order to generate @fig-2. The website link can be found  [here](https://stackoverflow.com/questions/47085514/simple-way-to-visualise-odds-ratios-in-r). 
+
+# Ethics Statement {#sec-ethics}
+
+The analysis uses data from a secondary source that is publicly available. Therefore, we did not require Research Ethics Board (REB) approval for our analysis. However, this is human research, and there are a few ethical issues we considered in this study. First, this is observational research on humans, and there is a possibility that the information could be used to identify individuals, even when not associated with their names. However, this is not a concern for this study, as the dataset is large with over 37,000 total observations. Additionally, no personal information regarding participants’ characteristics, other than age and gender, is reported. Lastly, individuals in the study had no reasonable expectation of privacy, as they consented to the use of this data for research purposes [@Stephenson2020]. Therefore, this analysis adheres to all the ethical guidelines required for using the data.
+
+To ensure reproducibility, we have included all code and data on our GitHub page, with the link provided on Page 1. We have also included .qmd file containing all the code used to generate this paper. The GitHub page includes a data dictionary and information on the dataset to facilitate reproducibility. Additionally, all code chunks contain comments explaining their functions, and we have also documented all the packages used in this analysis, which can be found on @sec-data. 
 \newpage
 
 # 8 Bibliography
-
-1.  Grolemund, G. (2014, July 16) *Introduction to R Markdown*. RStudio. <https://rmarkdown.rstudio.com/articles_intro.html>. (Last Accessed: April 4, 1991)
-
-2.  Dekking, F. M., et al. (2005) *A Modern Introduction to Probability and Statistics: Understanding why and how.* Springer Science & Business Media.
-
-3.  Allaire, J.J., et. el. *References: Introduction to R Markdown*. RStudio. <https://rmarkdown.rstudio.com/docs/>. (Last Accessed: April 4, 1991)
-
-\newpage
-
-# 9 Appendix
-
-Any additional notes/derivations that are supplementary to the report can be added in an appendix. This section will not be directly graded, but may be included for completion-sake.
